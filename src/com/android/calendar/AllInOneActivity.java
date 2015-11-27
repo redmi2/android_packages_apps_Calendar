@@ -26,6 +26,9 @@ import android.animation.Animator.AnimatorListener;
 import android.animation.ObjectAnimator;
 import android.app.ActionBar;
 import android.app.ActionBar.Tab;
+import android.app.DatePickerDialog;
+import android.app.Dialog;
+import android.app.DialogFragment;
 import android.app.Fragment;
 import android.app.FragmentManager;
 import android.app.FragmentTransaction;
@@ -33,6 +36,7 @@ import android.content.AsyncQueryHandler;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
@@ -57,6 +61,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.DatePicker;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.RelativeLayout.LayoutParams;
@@ -73,6 +78,7 @@ import com.android.calendar.month.MonthByWeekFragment;
 import com.android.calendar.selectcalendars.SelectVisibleCalendarsFragment;
 
 import java.io.IOException;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
@@ -740,6 +746,11 @@ public class AllInOneActivity extends AbstractCalendarActivity implements EventH
             mControlsMenu.setTitle(mHideControls ? mShowString : mHideString);
         }
 
+        MenuItem goToMenu = menu.findItem(R.id.action_goto);
+        if (!getResources().getBoolean(R.bool.show_goto_menu)) {
+            goToMenu.setVisible(false);
+        }
+
         MenuItem menuItem = menu.findItem(R.id.action_today);
         if (Utils.isJellybeanOrLater()) {
             // replace the default top layer drawable of the today icon with a
@@ -804,6 +815,12 @@ public class AllInOneActivity extends AbstractCalendarActivity implements EventH
             return true;
         } else if (itemId == R.id.action_search) {
             return false;
+        } else if (itemId == R.id.action_goto) {
+            // Get the current time to display in Dialog.
+            String timeZone = mTimeZone;
+            GoToDialogFragment goToFrg = GoToDialogFragment.newInstance(timeZone);
+            goToFrg.show(getFragmentManager(), "goto");
+            return true;
         } else {
             return mExtensions.handleItemSelected(item, this);
         }
@@ -1323,5 +1340,58 @@ public class AllInOneActivity extends AbstractCalendarActivity implements EventH
             mSearchMenu.expandActionView();
         }
         return false;
+    }
+
+    public static class GoToDialogFragment extends DialogFragment implements
+            DatePickerDialog.OnDateSetListener {
+        private static final String KEY_TIMEZONE = "timezone";
+        private static final String KEY_IS_CLICKED_DONE = "done";
+
+        public static GoToDialogFragment newInstance(String timeZone) {
+            GoToDialogFragment goToFrg = new GoToDialogFragment();
+            Bundle bundle = new Bundle();
+            bundle.putString(KEY_TIMEZONE, timeZone);
+            goToFrg.setArguments(bundle);
+            return goToFrg;
+        }
+
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            String timeZone = getArguments().getString(KEY_TIMEZONE);
+            Time t = new Time(timeZone);
+            Calendar calendar = Calendar.getInstance();
+            t.year = calendar.get(Calendar.YEAR);
+            t.month = calendar.get(Calendar.MONTH);
+            t.monthDay = calendar.get(Calendar.DATE);
+            DatePickerDialog dialog = new DatePickerDialog(getActivity(), this,
+                    t.year, t.month, t.monthDay) {
+
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    if (which == DialogInterface.BUTTON_POSITIVE) {
+                        // Avoid touching dialog box outside cause it disappears also perform
+                        // actions. Limit perform only after the user confirms by click done.
+                        getArguments().putBoolean(KEY_IS_CLICKED_DONE, true);
+                    }
+                    super.onClick(dialog, which);
+                }
+            };
+
+            return dialog;
+        }
+
+        @Override
+        public void onDateSet(DatePicker view, int year, int monthOfYear, int dayOfMonth) {
+            if (getArguments().getBoolean(KEY_IS_CLICKED_DONE)) {
+                CalendarController controller = CalendarController.getInstance(getActivity());
+                String timeZone = getArguments().getString(KEY_TIMEZONE);
+                Time t = new Time(timeZone);
+                t.set(dayOfMonth, monthOfYear, year);
+                t.set(t.toMillis(false));
+                controller.sendEvent(this, EventType.GO_TO, null, null, t, -1,
+                        ViewType.CURRENT, CalendarController.EXTRA_GOTO_TIME,
+                        null, null);
+            }
+        }
     }
 }
